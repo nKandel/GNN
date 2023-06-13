@@ -390,8 +390,19 @@ EXPORT Tensor
       *   contained N slices, the new dataset will contain N x nNodes
       *   slices.
       */
-    EXPORT DATASET(t_Tensor) Replicate(DATASET(t_Tensor) tens) := FUNCTION
-      tensD := DISTRIBUTE(tens, ALL);
+    EXPORT DATASET(t_Tensor) Replicate(DATASET(t_Tensor) tens, INTEGER limitNodes=0) := FUNCTION
+       
+      DATASET(t_Tensor) distPartial(DATASET(t_Tensor) t_in, INTEGER numNodes) := FUNCTION 
+        t0 := NORMALIZE(
+          t_in, 
+          numNodes, 
+          TRANSFORM(RECORDOF(LEFT),
+            SELF.nodeId := COUNTER-1,
+            SELF := LEFT), LOCAL);
+        t1 := DISTRIBUTE(t0, nodeId);
+        return t1;
+      END;
+      tensD := IF(limitNodes>0, distPartial(tens, limitNodes), DISTRIBUTE(tens, ALL));
       tensP := PROJECT(NOCOMBINE(tensD), TRANSFORM(RECORDOF(LEFT),
                                               SELF.nodeId := node,
                                               SELF := LEFT), LOCAL);

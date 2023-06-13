@@ -145,7 +145,7 @@ EXPORT GNNI := MODULE
   SHARED INTEGER getEffNodesNumber(nodeNumber) := FUNCTION
     /*
     nodeNumber: default value = -1 (meaning distribute to all nodes)
-                if nodeNumber > totalAvailableNode then fallback to all nodes, 
+                if totalAvailableNode<nodeNumber<0 then fallback to totalAvailableNodes, 
     */
     totalAvailableNodes := Thorlib.nodes();
     eNodeNumber := IF(nodeNumber<0, totalAvailableNodes, nodeNumber);
@@ -205,6 +205,7 @@ EXPORT GNNI := MODULE
     *         model.add().  Each string defines one layer of the model.
     * @param cdef (optional) A python string as would be passed to Keras model.compile(...).
     *         This line should begin with "compile".  Model is implicit here.
+    * @param nodes (optional) nodes number to run the program
     * @return A model token to be used in subsequent GNNI calls.
     */
   EXPORT UNSIGNED4 DefineModel(UNSIGNED4 sess, SET OF STRING ldef, STRING cdef = '', Integer nodes=-1) := FUNCTION
