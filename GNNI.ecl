@@ -141,6 +141,17 @@ EXPORT GNNI := MODULE
     * we prevent the compiler from pre-determining the result, potentially
     * breaking the dependency chain.
     */
+  
+  SHARED INTEGER getEffNodesNumber(nodeNumber) := FUNCTION
+    /*
+    nodeNumber: default value = -1 (meaning distribute to all nodes)
+                if nodeNumber > totalAvailableNode then fallback to all nodes, 
+    */
+    totalAvailableNodes := Thorlib.nodes();
+    eNodeNumber := IF(nodeNumber<0, totalAvailableNodes, nodeNumber);
+    return IF(totalAvailableNodes>eNodeNumber, eNodeNumber, totalAvailableNodes);
+  END;
+
   SHARED UNSIGNED4 getToken(UNSIGNED4 lastToken) := EMBED(Python)
     return lastToken + 1
   ENDEMBED;
@@ -196,13 +207,14 @@ EXPORT GNNI := MODULE
     *         This line should begin with "compile".  Model is implicit here.
     * @return A model token to be used in subsequent GNNI calls.
     */
-  EXPORT UNSIGNED4 DefineModel(UNSIGNED4 sess, SET OF STRING ldef, STRING cdef = '') := FUNCTION
+  EXPORT UNSIGNED4 DefineModel(UNSIGNED4 sess, SET OF STRING ldef, STRING cdef = '', Integer nodes=-1) := FUNCTION
     mdef1 := DATASET(COUNT(ldef), TRANSFORM(kString, SELF.typ := kStrType.layer,
                                             SELF.id  := COUNTER,
                                             SELF.text := ldef[COUNTER]));
     mdef2 := DATASET([{0, COUNT(ldef)+1, kStrType.compile, cdef}], kString);
     mdef := IF(LENGTH(cdef) > 0, mdef1 + mdef2, mdef1);
-    mdefRepl0 := SORT(DISTRIBUTE(mdef, ALL), id, LOCAL);
+    eNodes := getEffNodesNumber(nodes);
+    mdefRepl0 := SORT(DISTRIBUTE(mdef, eNodes), id, LOCAL);
     mdefRepl := PROJECT(NOCOMBINE(mdefRepl0), TRANSFORM(RECORDOF(LEFT), SELF.nodeId := nodeId, SELF := LEFT), LOCAL);
     kstatus := ASSERT(Keras.DefineModel(mdefRepl, sess), LENGTH(text) = 0, 'DefineModel Exception: ' + text);
     status := reduceResults(kstatus);
@@ -245,9 +257,11 @@ EXPORT GNNI := MODULE
                                    DATASET(FuncLayerDef) lDefs,
                                    SET OF STRING inputs,
                                    SET OF STRING outputs,
-                                   STRING cdef = '') := FUNCTION
+                                   STRING cdef = '', 
+                                   INTEGER nodes=-1) := FUNCTION
     // Distribute the lDefs to all nodes to make sure that the model is defined on each node
-    lDefsRepl := DISTRIBUTE(lDefs, ALL);
+    eNodes := getEffNodesNumber(nodes);
+    lDefsRepl := DISTRIBUTE(lDefs, eNodes);
     kstatus := ASSERT(Keras.DefineFuncModel(lDefsRepl, sess, inputs, outputs, cdef), LENGTH(text) = 0, 'DefineFuncModel Exception: ' + text);
     status := reduceResults(kstatus);
     // Extract the Keras modelId from the id field of the returned status.  Each node should have the
