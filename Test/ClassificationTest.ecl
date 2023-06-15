@@ -157,7 +157,8 @@ OUTPUT(wts, NAMED('InitWeights'));
 // Fit trains the models, given training X and Y data.  BatchSize is not the Keras batchSize,
 // but defines how many records are processed on each node before synchronizing the weights
 // Note that we use the NF form of Fit since we are using NumericField for I / o.
-mod2 := GNNI.FitNF(mod, trainX, trainY, batchSize := batchSize, numEpochs := numEpochs);
+//mod2 := GNNI.FitNF(mod, trainX, trainY, batchSize := batchSize, numEpochs := numEpochs);
+mod2 := GNNI.nNodeFitNF(mod, trainX, trainY, batchSize := batchSize, numEpochs := numEpochs, limitNodes_ := 0);
 
 OUTPUT(mod2, NAMED('mod2'));
 

@@ -144,12 +144,13 @@ EXPORT GNNI := MODULE
   
   SHARED INTEGER getEffNodesNumber(nodeNumber) := FUNCTION
     /*
-    nodeNumber: default value = -1 (meaning distribute to all nodes)
-                if totalAvailableNode<nodeNumber<0 then fallback to totalAvailableNodes, 
+    nodeNumber: default value = 0 (meaning distribute to all nodes)
+                if totalAvailableNode<nodeNumber<=0 then fallback to totalAvailableNodes,
     */
     totalAvailableNodes := Thorlib.nodes();
-    eNodeNumber := IF(nodeNumber<0, totalAvailableNodes, nodeNumber);
-    return IF(totalAvailableNodes>eNodeNumber, eNodeNumber, totalAvailableNodes);
+    eNodeNumber := IF(nodeNumber>0, nodeNumber, totalAvailableNodes);
+    // clipping eNodeNumber to totalAvailableNodes
+    return IF(eNodeNumber<totalAvailableNodes, eNodeNumber, totalAvailableNodes);
   END;
 
   SHARED UNSIGNED4 getToken(UNSIGNED4 lastToken) := EMBED(Python)
@@ -208,14 +209,13 @@ EXPORT GNNI := MODULE
     * @param nodes (optional) nodes number to run the program
     * @return A model token to be used in subsequent GNNI calls.
     */
-  EXPORT UNSIGNED4 DefineModel(UNSIGNED4 sess, SET OF STRING ldef, STRING cdef = '', Integer nodes=-1) := FUNCTION
+  EXPORT UNSIGNED4 DefineModel(UNSIGNED4 sess, SET OF STRING ldef, STRING cdef = '') := FUNCTION
     mdef1 := DATASET(COUNT(ldef), TRANSFORM(kString, SELF.typ := kStrType.layer,
                                             SELF.id  := COUNTER,
                                             SELF.text := ldef[COUNTER]));
     mdef2 := DATASET([{0, COUNT(ldef)+1, kStrType.compile, cdef}], kString);
     mdef := IF(LENGTH(cdef) > 0, mdef1 + mdef2, mdef1);
-    eNodes := getEffNodesNumber(nodes);
-    mdefRepl0 := SORT(DISTRIBUTE(mdef, eNodes), id, LOCAL);
+    mdefRepl0 := SORT(DISTRIBUTE(mdef, ALL), id, LOCAL);
     mdefRepl := PROJECT(NOCOMBINE(mdefRepl0), TRANSFORM(RECORDOF(LEFT), SELF.nodeId := nodeId, SELF := LEFT), LOCAL);
     kstatus := ASSERT(Keras.DefineModel(mdefRepl, sess), LENGTH(text) = 0, 'DefineModel Exception: ' + text);
     status := reduceResults(kstatus);
@@ -258,11 +258,9 @@ EXPORT GNNI := MODULE
                                    DATASET(FuncLayerDef) lDefs,
                                    SET OF STRING inputs,
                                    SET OF STRING outputs,
-                                   STRING cdef = '', 
-                                   INTEGER nodes=-1) := FUNCTION
+                                   STRING cdef = '') := FUNCTION
     // Distribute the lDefs to all nodes to make sure that the model is defined on each node
-    eNodes := getEffNodesNumber(nodes);
-    lDefsRepl := DISTRIBUTE(lDefs, eNodes);
+    lDefsRepl := DISTRIBUTE(lDefs, ALL);
     kstatus := ASSERT(Keras.DefineFuncModel(lDefsRepl, sess, inputs, outputs, cdef), LENGTH(text) = 0, 'DefineFuncModel Exception: ' + text);
     status := reduceResults(kstatus);
     // Extract the Keras modelId from the id field of the returned status.  Each node should have the
@@ -572,6 +570,88 @@ EXPORT GNNI := MODULE
     finalWts := LOOP(initWts, numEpochs, LEFT.nodeId < 999999, EXISTS(ROWS(LEFT)), doEpoch(ROWS(LEFT), COUNTER));
     RETURN IF(EXISTS(finalWts), getToken(model + numEpochs * numEpochs), 0);
   END; // Fit
+
+  EXPORT UNSIGNED4 nNodeFit(UNSIGNED4 model_,
+                      DATASET(t_Tensor) x_,
+                      DATASET(t_Tensor) y_,
+                      UNSIGNED4 batchSize_ = 512,
+                      UNSIGNED4 numEpochs_ = 1,
+                      REAL trainToLoss_ = 0,
+                      REAL learningRateReduction_ = 1.0,
+                      REAL batchSizeReduction_ = 1.0,
+                      UNSIGNED4 localBatchSize_ = 32,
+                      INTEGER limitNodes_=0) := FUNCTION
+    effNodes := getEffNodesNumber(limitNodes_);
+
+    UNSIGNED4 partialFit(
+      UNSIGNED4 model,
+      DATASET(t_Tensor) x,
+      DATASET(t_Tensor) y,
+      UNSIGNED4 batchSize = 512,
+      UNSIGNED4 numEpochs = 1,
+      REAL trainToLoss = 0,
+      REAL learningRateReduction = 1.0,
+      REAL batchSizeReduction = 1.0,
+      UNSIGNED4 localBatchSize = 32,
+      INTEGER limitNodes) := FUNCTION
+
+        kModelId := model DIV kerasIdFactor;
+        // Get the initial weights to use
+        initWts0 := GetWeights(model);
+        // We get the weights from the first node and then copy them to all nodes
+        // so that everybody starts with the same weights
+        initWts := Tensor.R4.Replicate(initWts0, limitNodes);
+        // Align the X and Y tensor lists so that we will get the corresponding records on the same nodes
+        // for each input and output tensor.
+        maxInputWi := MAX(x, wi);
+        // Change the wi's for outputs (y) so that they are after the input wi's
+        y1 := PROJECT(y, TRANSFORM(RECORDOF(LEFT), SELF.wi := LEFT.wi + maxInputWi, SELF := LEFT), LOCAL);
+        aligned := Tensor.R4.AlignTensors(x + y1);
+        // Now change the Y's wi back to the original numbers
+        xAl := aligned(wi <= maxInputWi);
+        yAl := PROJECT(aligned(wi > maxInputWi), TRANSFORM(RECORDOF(LEFT), SELF.wi := LEFT.wi - maxInputWi, SELF := LEFT), LOCAL);
+        totalRecords := Tensor.R4.GetRecordCount(yAl);
+        DATASET(t_Tensor) doEpoch(DATASET(t_Tensor) wts1, UNSIGNED epochNum) := FUNCTION
+          // Calculate the Learning Rate for this Epoch (eLR)
+          eLR := 1 - ((epochNum - 1) / (numEpochs - 1) * (1 - learningRateReduction));
+          eBatchSize := MAX(TRUNCATE((1 - ((epochNum -1) / (numEpochs -1) * (1 - batchSizeReduction))) * batchSize), 512);
+          batchesPerEpoch := ROUNDUP(totalRecords / effNodes / eBatchSize);
+          DATASET(t_Tensor) doBatch(DATASET(t_Tensor) wts2, UNSIGNED batchNum) := FUNCTION
+            // Train the model and Get the weight changes from each node
+            batchPos := (batchNum-1) * eBatchSize + 1;
+            xBatch := int.TensExtract(xAl, batchPos, eBatchSize);
+            yBatch := int.TensExtract(yAl, batchPos, eBatchSize);
+            wtChanges0 := IF(EXISTS(yBatch), Keras.FitBatch(wts2, xBatch, yBatch, model, epochNum, kModelId, localBatchSize, eLR), DATASET([], t_Tensor));
+            // Move all the changes for a given wi and slice to the same node.  Each
+            // node has a set of wi/sliceIds to roll up.  Note that the original
+            // weights are already replicated to all nodes.
+            wtChanges := DISTRIBUTE(wtChanges0, wi + sliceId);
+            // Sum up the original weights (de-replicated) and all changes for each wi and slice
+            newWts := rollUpdates(wts2((wi + sliceId) % effNodes = nodeId), wtChanges);
+            // Note: newWts have been replicated to all nodes by rollUpdates.
+            batchLoss := IF(EXISTS(newWts), GetLoss(model + (batchesPerEpoch * (epochNum-1)) + batchNum), 1.0);
+            logProgress2 := Syslog.addWorkunitInformation('Training Status (2): ModelId = ' +
+                    kModelId + ', Epoch = ' + epochNum + ', Batch = ' + batchNum + ', Loss = ' + batchLoss);
+            RETURN newWts;
+          END;
+          epochWts0 := LOOP(wts1, batchesPerEpoch, doBatch(ROWS(LEFT), COUNTER));
+          epochLoss := IF(EXISTS(epochWts0), GetLoss(model + (batchesPerEpoch * (epochNum-1))), 1.0);
+          logProgress := Syslog.addWorkunitInformation('Training Status: ModelId = ' +
+                          kModelId + ', Epoch = ' + epochNum + ', LR = ' + ROUND(eLR, 2) + ', bs = ' + eBatchSize + ', Loss = ' + epochLoss);
+          // If we've met the trainToLoss goal, mark as final to end the LOOP.  We mark the node id as
+          // 999999 to indicate that we are done.
+          markFinal := PROJECT(epochWts0, TRANSFORM(RECORDOF(LEFT), SELF.nodeId := 999999, SELF := LEFT));
+          epochWts := IF(epochLoss < trainToLoss, markFinal, epochWts0);
+          RETURN WHEN(epochWts, logProgress);
+        END;
+        finalWts := LOOP(initWts, numEpochs, LEFT.nodeId < 999999, EXISTS(ROWS(LEFT)), doEpoch(ROWS(LEFT), COUNTER));
+        RETURN IF(EXISTS(finalWts), getToken(model + numEpochs * numEpochs), 0);
+        END;
+
+    RETURN IF(effnodes<nNodes, partialFit(model_, x_, y_, batchSize_, numEpochs_, trainToLoss_, learningRateReduction_, batchSizeReduction_, localBatchSize_, limitNodes_), Fit(
+        model_, x_, y_, batchSize_, numEpochs_, trainToLoss_, learningRateReduction_, batchSizeReduction_, localBatchSize_));
+
+  END; // nNodeFit
   /**
     * Determine the loss and other metrics in order to evaluate
     * the model.
@@ -734,6 +814,21 @@ EXPORT GNNI := MODULE
     yT := NF2Tensor(y);
     RETURN Fit(model, xT, yT, batchSize, numEpochs, trainToLoss, learningRateReduction,
                 batchSizeReduction, localBatchSize);
+  END;
+  
+  EXPORT UNSIGNED4 nNodeFitNF(UNSIGNED4 model,
+                    DATASET(NumericField) x,
+                    DATASET(NumericField) y,
+                    UNSIGNED4 batchSize = 512,
+                    UNSIGNED4 numEpochs = 1,
+                    REAL trainToLoss = 0,
+                    REAL learningRateReduction = 1.0,
+                    REAL batchSizeReduction = 1.0,
+                    UNSIGNED4 localBatchSize = 32, INTEGER limitNodes_=0) := FUNCTION
+    xT := NF2Tensor(x);
+    yT := NF2Tensor(y);
+    RETURN nNodeFit(model, xT, yT, batchSize, numEpochs, trainToLoss, learningRateReduction,
+                batchSizeReduction, localBatchSize, limitNodes_);
   END;
   /**
     * Evaluate a model with 2 dimensional input and output using NumericField
