@@ -623,11 +623,13 @@ EXPORT Tensor
       * Because of the number of times this is called, we need to optimize as much as possible,
       * even at the cost of clarity.
       */
-    SHARED UNSIGNED4 calcNodeId2(UNSIGNED4 wi, UNSIGNED4 nSlices, UNSIGNED4 sliceSize, UNSIGNED recNum, UNSIGNED4 recSize) := FUNCTION
+    SHARED UNSIGNED4 calcNodeId2(UNSIGNED4 wi, UNSIGNED4 nSlices, UNSIGNED4 sliceSize, UNSIGNED recNum, UNSIGNED4 recSize, INTEGER limitNodes = 0) := FUNCTION
       sliceIdZ :=((recNum -1) * recSize) DIV sliceSize; // Zero based
-      relNode := sliceIdZ DIV (nSlices / nNodes);
+      effNodes := getEffNodesNumber(limitNodes);
+      
+      relNode := sliceIdZ DIV (nSlices / effNodes);
       //nodeId := (wi - 1) + relNode % nNodes;
-      nodeId := relNode % nNodes; // Temporarily disable spreading by wi
+      nodeId := relNode % effNodes; // Temporarily disable spreading by wi
       RETURN nodeId;
     END;
 
@@ -673,7 +675,7 @@ EXPORT Tensor
       nSlices := ROUNDUP(totalSize / sliceSize);
       indxSizes := calcIndexSizes(shape);
       recSize := indxSizes[1];
-      contentsD := DISTRIBUTE(contents, calcNodeId2(wi, nSlices, sliceElems, indexes[1], recSize));
+      contentsD := DISTRIBUTE(contents, calcNodeId2(wi, nSlices, sliceElems, indexes[1], recSize, limitNodes:=effNodes));
       contentsDS := SORT(NOCOMBINE(contentsD), indexes[1], LOCAL);
       slices0 := makeSlices(contentsDS, wi, shape, adjShape, t_TensType.R4, elemSize, sliceElems);
       // If not replicated, slices are already correctly distributed (i.e. by wi and sliceId)
@@ -933,7 +935,7 @@ EXPORT Tensor
       * @return A new Tensor List with the same number of tensors as the input
       *    list, with all of the tensors being aligned.
       **/
-    EXPORT DATASET(t_Tensor) AlignTensors(DATASET(t_Tensor) tensList) := FUNCTION
+    EXPORT DATASET(t_Tensor) AlignTensors(DATASET(t_Tensor) tensList, INTEGER   limitNodes = 0) := FUNCTION
       // This can be optimized if necessary by custom restructuring
       //  versus use of GetData(...) and MakeTensor(...)
       elemSize := 4; // REAL4
@@ -963,7 +965,7 @@ EXPORT Tensor
         // wi of the largestRecItem, and then project to the correct wi.  This is because MakeTensor spreads
         // the wi's across nodes.  By Making all the tensors with the wi of the largestRecItem, we
         // save the need to re-create that largest of the tensors.
-        adjTens0 := MakeTensor(thisTensShape, thisTensDat, wi := largestRecWI, forceMaxSliceSize := thisMaxSliceSize);
+        adjTens0 := MakeTensor(thisTensShape, thisTensDat, wi := largestRecWI, forceMaxSliceSize := thisMaxSliceSize, limitNodes:=limitNodes);
         adjTens := PROJECT(adjTens0, TRANSFORM(RECORDOF(LEFT), SELF.wi := ctr, SELF := LEFT), LOCAL);
         // If this is the tensor with the largest rec size, don't need to adjust.  Otherwise adjust.
         newTens := IF(ctr = largestRecWI, thisTens, adjTens);
