@@ -158,7 +158,7 @@ OUTPUT(wts, NAMED('InitWeights'));
 // but defines how many records are processed on each node before synchronizing the weights
 // Note that we use the NF form of Fit since we are using NumericField for I / o.
 //mod2 := GNNI.FitNF(mod, trainX, trainY, batchSize := batchSize, numEpochs := numEpochs);
-mod2 := GNNI.nNodeFitNF(mod, trainX, trainY, batchSize := batchSize, numEpochs := numEpochs, limitNodes_ := 0);
+mod2 := GNNI.nNodeFitNF(mod, trainX, trainY, batchSize := batchSize, numEpochs := numEpochs, limitNodes_ := 2);
 
 OUTPUT(mod2, NAMED('mod2'));
 

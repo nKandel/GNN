@@ -554,13 +554,13 @@ EXPORT GNNI := MODULE
         // Note: newWts have been replicated to all nodes by rollUpdates.
         batchLoss := IF(EXISTS(newWts), GetLoss(model + (batchesPerEpoch * (epochNum-1)) + batchNum), 1.0);
         logProgress2 := Syslog.addWorkunitInformation('Training Status (2): ModelId = ' +
-                kModelId + ', Epoch = ' + epochNum + ', Batch = ' + batchNum + ', Loss = ' + batchLoss);
+                kModelId + ', Epoch = ' + epochNum + ', Batch = ' + batchNum + ', Loss = ' + batchLoss + ', nNode = ' + nNodes);
         RETURN newWts;
       END;
       epochWts0 := LOOP(wts1, batchesPerEpoch, doBatch(ROWS(LEFT), COUNTER));
       epochLoss := IF(EXISTS(epochWts0), GetLoss(model + (batchesPerEpoch * (epochNum-1))), 1.0);
       logProgress := Syslog.addWorkunitInformation('Training Status: ModelId = ' +
-                      kModelId + ', Epoch = ' + epochNum + ', LR = ' + ROUND(eLR, 2) + ', bs = ' + eBatchSize + ', Loss = ' + epochLoss);
+                      kModelId + ', Epoch = ' + epochNum + ', LR = ' + ROUND(eLR, 2) + ', bs = ' + eBatchSize + ', Loss = ' + epochLoss + ', nNode = ' + nNodes);
       // If we've met the trainToLoss goal, mark as final to end the LOOP.  We mark the node id as
       // 999999 to indicate that we are done.
       markFinal := PROJECT(epochWts0, TRANSFORM(RECORDOF(LEFT), SELF.nodeId := 999999, SELF := LEFT));
@@ -568,6 +568,8 @@ EXPORT GNNI := MODULE
       RETURN WHEN(epochWts, logProgress);
     END;
     finalWts := LOOP(initWts, numEpochs, LEFT.nodeId < 999999, EXISTS(ROWS(LEFT)), doEpoch(ROWS(LEFT), COUNTER));
+
+    // *** TODO: setweight should set weight to all nodes; not just training nodes; in the final step only
     RETURN IF(EXISTS(finalWts), getToken(model + numEpochs * numEpochs), 0);
   END; // Fit
 
@@ -600,7 +602,7 @@ EXPORT GNNI := MODULE
         initWts0 := GetWeights(model);
         // We get the weights from the first node and then copy them to all nodes
         // so that everybody starts with the same weights
-        initWts := Tensor.R4.Replicate(initWts0, limitNodes);
+        initWts := Tensor.R4.Replicate(initWts0, 0);
         // Align the X and Y tensor lists so that we will get the corresponding records on the same nodes
         // for each input and output tensor.
         maxInputWi := MAX(x, wi);
@@ -631,13 +633,13 @@ EXPORT GNNI := MODULE
             // Note: newWts have been replicated to all nodes by rollUpdates.
             batchLoss := IF(EXISTS(newWts), GetLoss(model + (batchesPerEpoch * (epochNum-1)) + batchNum), 1.0);
             logProgress2 := Syslog.addWorkunitInformation('Training Status (2): ModelId = ' +
-                    kModelId + ', Epoch = ' + epochNum + ', Batch = ' + batchNum + ', Loss = ' + batchLoss);
+                    kModelId + ', Epoch = ' + epochNum + ', Batch = ' + batchNum + ', Loss = ' + batchLoss + ', nNode = ' + limitNodes);
             RETURN newWts;
           END;
           epochWts0 := LOOP(wts1, batchesPerEpoch, doBatch(ROWS(LEFT), COUNTER));
           epochLoss := IF(EXISTS(epochWts0), GetLoss(model + (batchesPerEpoch * (epochNum-1))), 1.0);
           logProgress := Syslog.addWorkunitInformation('Training Status: ModelId = ' +
-                          kModelId + ', Epoch = ' + epochNum + ', LR = ' + ROUND(eLR, 2) + ', bs = ' + eBatchSize + ', Loss = ' + epochLoss);
+                          kModelId + ', Epoch = ' + epochNum + ', LR = ' + ROUND(eLR, 2) + ', bs = ' + eBatchSize + ', Loss = ' + epochLoss + ', nNode = ' + limitNodes);
           // If we've met the trainToLoss goal, mark as final to end the LOOP.  We mark the node id as
           // 999999 to indicate that we are done.
           markFinal := PROJECT(epochWts0, TRANSFORM(RECORDOF(LEFT), SELF.nodeId := 999999, SELF := LEFT));
@@ -742,12 +744,12 @@ EXPORT GNNI := MODULE
   /**
     * Convert a NumericField matrix dataset to Tensor format.
     */
-  SHARED DATASET(t_Tensor) NF2Tensor(DATASET(NumericField) nf) := FUNCTION
+  SHARED DATASET(t_Tensor) NF2Tensor(DATASET(NumericField) nf, INTEGER limitNodes = 0) := FUNCTION
     tensDat := PROJECT(nf, TRANSFORM(TensData,
                               SELF.indexes := [LEFT.id, LEFT.number],
                               SELF := LEFT), LOCAL);
     maxNumber := MAX(nf, number);
-    tens := Tensor.R4.MakeTensor([0,maxNumber], tensDat);
+    tens := Tensor.R4.MakeTensor([0,maxNumber], tensDat, limitNodes := limitNodes);
     RETURN tens;
   END;
   /**
@@ -825,8 +827,8 @@ EXPORT GNNI := MODULE
                     REAL learningRateReduction = 1.0,
                     REAL batchSizeReduction = 1.0,
                     UNSIGNED4 localBatchSize = 32, INTEGER limitNodes_=0) := FUNCTION
-    xT := NF2Tensor(x);
-    yT := NF2Tensor(y);
+    xT := NF2Tensor(x, limitNodes:=limitNodes_);
+    yT := NF2Tensor(y, limitNodes:=limitNodes_);
     RETURN nNodeFit(model, xT, yT, batchSize, numEpochs, trainToLoss, learningRateReduction,
                 batchSizeReduction, localBatchSize, limitNodes_);
   END;

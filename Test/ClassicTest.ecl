@@ -17,9 +17,9 @@ IMPORT GNN.Internal AS Int;
 IMPORT Std.System.Thorlib;
 t_Tensor := Tensor.R4.t_Tensor;
 TensData := Tensor.R4.TensData;
-
+///opt/HPCCSystems/9.0.6/clienttools/bin
 RAND_MAX := POWER(2,32) -1;
-
+nodes := 2;
 // Test parameters
 trainCount := 10000;
 testCount := 1000;
@@ -132,7 +132,7 @@ s := GNNI.GetSession();
 // DefineModel is dependent on the Session
 //   ldef contains the Python definition for each Keras layer
 //   compileDef contains the Keras compile statement.
-mod := GNNI.DefineModel(s, ldef, compileDef);
+mod := GNNI.DefineModel(s, ldef, compileDef, nodes);
 // GetWeights returns the initialized weights that have been synchronized across all nodes.
 wts := GNNI.GetWeights(mod);
 

@@ -115,6 +115,17 @@ EXPORT Tensor
     * @internal
     */
   EXPORT MAX_SLICE := 250000;
+
+  SHARED INTEGER getEffNodesNumber(nodeNumber) := FUNCTION
+    /*
+    nodeNumber: default value = 0 (meaning distribute to all nodes)
+                if totalAvailableNode<nodeNumber<=0 then fallback to totalAvailableNodes,
+    */
+    totalAvailableNodes := Thorlib.nodes();
+    eNodeNumber := IF(nodeNumber>0, nodeNumber, totalAvailableNodes);
+    // clipping eNodeNumber to totalAvailableNodes
+    return IF(eNodeNumber<totalAvailableNodes, eNodeNumber, totalAvailableNodes);
+  END;
   /**
     * Calculate the total (Dense) number of cells in the t_Tensor, given a shape
     * vector.
@@ -136,7 +147,7 @@ EXPORT Tensor
   /**
     * @internal
     */
-  EXPORT UNSIGNED4 calcSliceSize(UNSIGNED8 dataSize, UNSIGNED4 elemSize, t_Indexes shape, BOOLEAN isDistributed, UNSIGNED2 breakAtIndex) := FUNCTION
+  EXPORT UNSIGNED4 calcSliceSize(UNSIGNED8 dataSize, UNSIGNED4 elemSize, t_Indexes shape, BOOLEAN isDistributed, UNSIGNED2 breakAtIndex, integer effNodes=0) := FUNCTION
     UNSIGNED4 calcBreakSize(t_Indexes shape, UNSIGNED4 elemSize, UNSIGNED2 breakAtIndex) := EMBED(Python)
       import numpy as np
       if breakAtIndex == 0:
@@ -147,7 +158,8 @@ EXPORT Tensor
     ENDEMBED;
     // If this is a distributed tensor, then make sure we size the slices such that
     // there is at least one per node.
-    minPartitions := IF(isDistributed, nNodes, 1);
+    effNodes_ := getEffNodesNumber(effNodes);
+    minPartitions := IF(isDistributed, effNodes_, 1);
     // Breaksize is the smallest unit we need to keep together
     breakSize := calcBreakSize(shape, elemSize, breakAtIndex);
     //maxPartSize := MIN((dataSize / minPartitions + breakSize - 1) div breakSize * breakSize, (MAX_SLICE div breakSize) * breaksize);
@@ -642,8 +654,9 @@ EXPORT Tensor
                                 DATASET(TensData) contents = DATASET([], TensData),
                                 BOOLEAN replicated = FALSE,
                                 UNSIGNED4 wi = 1,
-                                UNSIGNED4 forceMaxSliceSize = 0) := FUNCTION
+                                UNSIGNED4 forceMaxSliceSize = 0, INTEGER limitNodes=0) := FUNCTION
       isDistributed := NOT replicated; // If not replicated then distributed
+      effNodes := getEffNodesNumber(limitNodes);
       // If the first term of the shape is 0 (uspecified), then the data is record oriented
       // vs block oriented.  In that case, set breakAtIndex to 1, to make sure that the
       // slices don't span record boundaries.  We assume that there is no need for a
@@ -654,7 +667,7 @@ EXPORT Tensor
       totalCount := cellCount(adjShape);
       elemSize := 4;
       totalSize := totalCount * elemSize;
-      sliceSize0 := calcSliceSize(totalSize, elemSize, adjShape, isDistributed, breakAtIndex);
+      sliceSize0 := calcSliceSize(totalSize, elemSize, adjShape, isDistributed, breakAtIndex, effNodes:=effNodes);
       sliceSize := IF(forceMaxSliceSize > 0, forceMaxSliceSize, sliceSize0);
       sliceElems := sliceSize / elemSize;
       nSlices := ROUNDUP(totalSize / sliceSize);
