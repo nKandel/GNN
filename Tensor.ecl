@@ -680,7 +680,7 @@ EXPORT Tensor
       contentsDS := SORT(NOCOMBINE(contentsD), indexes[1], LOCAL);
       slices0 := makeSlices(contentsDS, wi, shape, adjShape, t_TensType.R4, elemSize, sliceElems);
       // If not replicated, slices are already correctly distributed (i.e. by wi and sliceId)
-      slices1 := IF(replicated, Replicate(slices0), PROJECT(slices0, TRANSFORM(RECORDOF(LEFT),
+      slices1 := IF(replicated, Replicate(slices0, limitNodes:=effNodes), PROJECT(slices0, TRANSFORM(RECORDOF(LEFT),
                                                             SELF.nodeId := node,
                                                             SELF := LEFT), LOCAL));
       slices := SORT(slices1, sliceId, LOCAL);

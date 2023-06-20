@@ -12,6 +12,8 @@ IMPORT Std.System.Thorlib;
 
 nNodes := Thorlib.nodes();
 nodeId := Thorlib.node();
+output(nNodes, Named('nNodes'));
+output(nodeId, Named('nodeId'));
 testRec := RECORD
   UNSIGNED node;
   STRING tf_version;

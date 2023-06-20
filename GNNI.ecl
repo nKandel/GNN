@@ -5,7 +5,6 @@ IMPORT PYTHON3 AS PYTHON;
 IMPORT $ AS GNN;
 IMPORT GNN.Internal as int;
 IMPORT GNN.Types;
-IMPORT Tensor.getEffNodesNumber as getEffNodesNumber
 IMPORT GNN.Internal.Types AS iTypes;
 IMPORT GNN.Internal.Keras;
 IMPORT GNN.Tensor;
@@ -143,6 +142,17 @@ EXPORT GNNI := MODULE
     * breaking the dependency chain.
     */
 
+  SHARED INTEGER getEffNodesNumber(nodeNumber) := FUNCTION
+    /*
+    nodeNumber: default value = 0 (meaning distribute to all nodes)
+                if totalAvailableNode<nodeNumber<=0 then fallback to totalAvailableNodes,
+    */
+    totalAvailableNodes := Thorlib.nodes();
+    eNodeNumber := IF(nodeNumber>0, nodeNumber, totalAvailableNodes);
+    // clipping eNodeNumber to totalAvailableNodes
+    return IF(eNodeNumber<totalAvailableNodes, eNodeNumber, totalAvailableNodes);
+  END;
+
   SHARED UNSIGNED4 getToken(UNSIGNED4 lastToken) := EMBED(Python)
     return lastToken + 1
   ENDEMBED;
@@ -152,11 +162,12 @@ EXPORT GNNI := MODULE
     * if there was at least 1 error, or if a reply was not received from
     * every node.  Otherwise returns blank string.
     */
-  SHARED STRING reduceResults(DATASET(kString) results) := FUNCTION
+  SHARED STRING reduceResults(DATASET(kString) results, INTEGER limitNodes=0) := FUNCTION
     rr0 :=  results(LENGTH(text) > 0);
+    effNodes := getEffNodesNumber(limitNodes);
     rr1 := rr0[1].text;
-    rr := IF(COUNT(results) != nNodes,
-            '''Didn't recieve reply from all nodes: ''' + COUNT(results), rr1);
+    rr := IF(COUNT(results) != effNodes,
+            '''Didn\'t recieve reply from all nodes: (''' + effNodes +''' nodes) '''+ COUNT(results), rr1);
     return rr;
   END;
 
@@ -585,20 +596,20 @@ EXPORT GNNI := MODULE
       REAL learningRateReduction = 1.0,
       REAL batchSizeReduction = 1.0,
       UNSIGNED4 localBatchSize = 32,
-      INTEGER effNodes) := FUNCTION
+      INTEGER effNodes=0) := FUNCTION
 
         kModelId := model DIV kerasIdFactor;
         // Get the initial weights to use
         initWts0 := GetWeights(model);
         // We get the weights from the first node and then copy them to all nodes
         // so that everybody starts with the same weights
-        initWts := Tensor.R4.Replicate(initWts0, 0);
+        initWts := Tensor.R4.Replicate(initWts0, limitNodes:=0);
         // Align the X and Y tensor lists so that we will get the corresponding records on the same nodes
         // for each input and output tensor.
         maxInputWi := MAX(x, wi);
         // Change the wi's for outputs (y) so that they are after the input wi's
         y1 := PROJECT(y, TRANSFORM(RECORDOF(LEFT), SELF.wi := LEFT.wi + maxInputWi, SELF := LEFT), LOCAL);
-        aligned := Tensor.R4.AlignTensors(x + y1);
+        aligned := Tensor.R4.AlignTensors(x + y1, limitNodes := effNodes);
         // Now change the Y's wi back to the original numbers
         xAl := aligned(wi <= maxInputWi);
         yAl := PROJECT(aligned(wi > maxInputWi), TRANSFORM(RECORDOF(LEFT), SELF.wi := LEFT.wi - maxInputWi, SELF := LEFT), LOCAL);
