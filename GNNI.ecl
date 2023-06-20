@@ -5,6 +5,7 @@ IMPORT PYTHON3 AS PYTHON;
 IMPORT $ AS GNN;
 IMPORT GNN.Internal as int;
 IMPORT GNN.Types;
+IMPORT Tensor.getEffNodesNumber as getEffNodesNumber
 IMPORT GNN.Internal.Types AS iTypes;
 IMPORT GNN.Internal.Keras;
 IMPORT GNN.Tensor;
@@ -141,17 +142,6 @@ EXPORT GNNI := MODULE
     * we prevent the compiler from pre-determining the result, potentially
     * breaking the dependency chain.
     */
-  
-  SHARED INTEGER getEffNodesNumber(nodeNumber) := FUNCTION
-    /*
-    nodeNumber: default value = 0 (meaning distribute to all nodes)
-                if totalAvailableNode<nodeNumber<=0 then fallback to totalAvailableNodes,
-    */
-    totalAvailableNodes := Thorlib.nodes();
-    eNodeNumber := IF(nodeNumber>0, nodeNumber, totalAvailableNodes);
-    // clipping eNodeNumber to totalAvailableNodes
-    return IF(eNodeNumber<totalAvailableNodes, eNodeNumber, totalAvailableNodes);
-  END;
 
   SHARED UNSIGNED4 getToken(UNSIGNED4 lastToken) := EMBED(Python)
     return lastToken + 1
@@ -573,17 +563,17 @@ EXPORT GNNI := MODULE
     RETURN IF(EXISTS(finalWts), getToken(model + numEpochs * numEpochs), 0);
   END; // Fit
 
-  EXPORT UNSIGNED4 nNodeFit(UNSIGNED4 model_,
-                      DATASET(t_Tensor) x_,
-                      DATASET(t_Tensor) y_,
-                      UNSIGNED4 batchSize_ = 512,
-                      UNSIGNED4 numEpochs_ = 1,
-                      REAL trainToLoss_ = 0,
-                      REAL learningRateReduction_ = 1.0,
-                      REAL batchSizeReduction_ = 1.0,
-                      UNSIGNED4 localBatchSize_ = 32,
-                      INTEGER limitNodes_=0) := FUNCTION
-    effNodes := getEffNodesNumber(limitNodes_);
+  EXPORT UNSIGNED4 nNodeFit(UNSIGNED4 model,
+                      DATASET(t_Tensor) x,
+                      DATASET(t_Tensor) y,
+                      UNSIGNED4 batchSize = 512,
+                      UNSIGNED4 numEpochs = 1,
+                      REAL trainToLoss = 0,
+                      REAL learningRateReduction = 1.0,
+                      REAL batchSizeReduction = 1.0,
+                      UNSIGNED4 localBatchSize = 32,
+                      INTEGER limitNodes=0) := FUNCTION
+    effNodes_ := getEffNodesNumber(limitNodes);
 
     UNSIGNED4 partialFit(
       UNSIGNED4 model,
@@ -595,7 +585,7 @@ EXPORT GNNI := MODULE
       REAL learningRateReduction = 1.0,
       REAL batchSizeReduction = 1.0,
       UNSIGNED4 localBatchSize = 32,
-      INTEGER limitNodes) := FUNCTION
+      INTEGER effNodes) := FUNCTION
 
         kModelId := model DIV kerasIdFactor;
         // Get the initial weights to use
@@ -650,8 +640,9 @@ EXPORT GNNI := MODULE
         RETURN IF(EXISTS(finalWts), getToken(model + numEpochs * numEpochs), 0);
         END;
 
-    RETURN IF(effnodes<nNodes, partialFit(model_, x_, y_, batchSize_, numEpochs_, trainToLoss_, learningRateReduction_, batchSizeReduction_, localBatchSize_, limitNodes_), Fit(
-        model_, x_, y_, batchSize_, numEpochs_, trainToLoss_, learningRateReduction_, batchSizeReduction_, localBatchSize_));
+    RETURN IF(effNodes_<nNodes, partialFit(
+        model, x, y, batchSize, numEpochs, trainToLoss, learningRateReduction, batchSizeReduction, localBatchSize, effNodes_), Fit(
+        model, x, y, batchSize, numEpochs, trainToLoss, learningRateReduction, batchSizeReduction, localBatchSize));
 
   END; // nNodeFit
   /**
@@ -826,11 +817,11 @@ EXPORT GNNI := MODULE
                     REAL trainToLoss = 0,
                     REAL learningRateReduction = 1.0,
                     REAL batchSizeReduction = 1.0,
-                    UNSIGNED4 localBatchSize = 32, INTEGER limitNodes_=0) := FUNCTION
-    xT := NF2Tensor(x, limitNodes:=limitNodes_);
-    yT := NF2Tensor(y, limitNodes:=limitNodes_);
+                    UNSIGNED4 localBatchSize = 32, INTEGER limitNodes=0) := FUNCTION
+    xT := NF2Tensor(x, limitNodes:=limitNodes);
+    yT := NF2Tensor(y, limitNodes:=limitNodes);
     RETURN nNodeFit(model, xT, yT, batchSize, numEpochs, trainToLoss, learningRateReduction,
-                batchSizeReduction, localBatchSize, limitNodes_);
+                batchSizeReduction, localBatchSize, limitNodes);
   END;
   /**
     * Evaluate a model with 2 dimensional input and output using NumericField

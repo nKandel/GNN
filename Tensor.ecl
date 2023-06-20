@@ -147,7 +147,7 @@ EXPORT Tensor
   /**
     * @internal
     */
-  EXPORT UNSIGNED4 calcSliceSize(UNSIGNED8 dataSize, UNSIGNED4 elemSize, t_Indexes shape, BOOLEAN isDistributed, UNSIGNED2 breakAtIndex, integer effNodes=0) := FUNCTION
+  EXPORT UNSIGNED4 calcSliceSize(UNSIGNED8 dataSize, UNSIGNED4 elemSize, t_Indexes shape, BOOLEAN isDistributed, UNSIGNED2 breakAtIndex, integer limitNodes=0) := FUNCTION
     UNSIGNED4 calcBreakSize(t_Indexes shape, UNSIGNED4 elemSize, UNSIGNED2 breakAtIndex) := EMBED(Python)
       import numpy as np
       if breakAtIndex == 0:
@@ -158,8 +158,8 @@ EXPORT Tensor
     ENDEMBED;
     // If this is a distributed tensor, then make sure we size the slices such that
     // there is at least one per node.
-    effNodes_ := getEffNodesNumber(effNodes);
-    minPartitions := IF(isDistributed, effNodes_, 1);
+    effNodes := getEffNodesNumber(limitNodes);
+    minPartitions := IF(isDistributed, effNodes, 1);
     // Breaksize is the smallest unit we need to keep together
     breakSize := calcBreakSize(shape, elemSize, breakAtIndex);
     //maxPartSize := MIN((dataSize / minPartitions + breakSize - 1) div breakSize * breakSize, (MAX_SLICE div breakSize) * breaksize);
@@ -414,7 +414,8 @@ EXPORT Tensor
         t1 := DISTRIBUTE(t0, nodeId);
         return t1;
       END;
-      tensD := IF(limitNodes>0, distPartial(tens, limitNodes), DISTRIBUTE(tens, ALL));
+      effNodes := getEffNodesNumber(limitNodes);
+      tensD := IF(effNodes<nNodes, distPartial(tens, effNodes), DISTRIBUTE(tens, ALL));
       tensP := PROJECT(NOCOMBINE(tensD), TRANSFORM(RECORDOF(LEFT),
                                               SELF.nodeId := node,
                                               SELF := LEFT), LOCAL);
@@ -669,7 +670,7 @@ EXPORT Tensor
       totalCount := cellCount(adjShape);
       elemSize := 4;
       totalSize := totalCount * elemSize;
-      sliceSize0 := calcSliceSize(totalSize, elemSize, adjShape, isDistributed, breakAtIndex, effNodes:=effNodes);
+      sliceSize0 := calcSliceSize(totalSize, elemSize, adjShape, isDistributed, breakAtIndex, limitNodes:=effNodes);
       sliceSize := IF(forceMaxSliceSize > 0, forceMaxSliceSize, sliceSize0);
       sliceElems := sliceSize / elemSize;
       nSlices := ROUNDUP(totalSize / sliceSize);
@@ -688,10 +689,11 @@ EXPORT Tensor
     /**
       * Restore a replicated Tensor to a single distributed Tensor
       */
-    SHARED DATASET(t_Tensor) deReplicate(DATASET(t_Tensor) tens) := FUNCTION
+    SHARED DATASET(t_Tensor) deReplicate(DATASET(t_Tensor) tens, INTEGER limitNodes=0) := FUNCTION
+      effNodes := getEffNodesNumber(limitNodes);
       nSlices := COUNT(tens);
       maxSlice := MAX(tens, sliceId);
-      slicesPerNode := nSlices / nNodes;
+      slicesPerNode := nSlices / effNodes;
       wi := tens[1].wi;
       derep := tens(nodeId = calcNodeId(wi, sliceId, nSlices));
       // Only de-rep if it is a replicated tensor, otherwise bad things can happen.
