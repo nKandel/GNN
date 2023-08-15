@@ -45,7 +45,7 @@ effNodes := 1;
 // Prepare trining data
 RAND_MAX := POWER(2,32) -1;
 // Test parameters
-trainCount := 100000;
+trainCount := 1000;
 testCount := 100;
 featureCount := 5;
 classCount := 3;
@@ -208,7 +208,7 @@ startTime := Date.CurrentSeconds(true):CHECKPOINT('startTime');//: PERSIST('star
 mod3 := GNNI.Fit(
   mod, trainX, trainY, batchSize := batchSize, 
   numEpochs := numEpochs, 
-  limitNodes:=1);
+  limitNodes:=0);
 
 endTime := Date.CurrentSeconds(true);//: PERSIST('endTime', refresh(True));
 // OUTPUT(mod3, NAMED('mod3'));

@@ -94,7 +94,7 @@ EXPORT Keras := MODULE
         else:
           return func + ': ' + exc[:200] + ' ... ' + exc[-200:]
       format_exc = _format_exc
-
+      
       # Assign GPUs to Thor nodes if needed.
       import os
       #this "CUDA VISIBLE DEVICES" will set which GPU a given Thor node will have access to
@@ -663,7 +663,7 @@ EXPORT Keras := MODULE
       # Error occurred, but no string returned.  So we do an assert to convey the error.
       assert 1 == 0, format_exc('Evaluate')
   ENDEMBED;
-
+  
   /**
     * Use the Keras model to predict the output for a set
     * of independent (x) data.

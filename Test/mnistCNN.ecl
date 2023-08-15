@@ -39,7 +39,6 @@ SET OF REAL4 get_train_X() := EMBED(Python)
   import numpy as np
   mnist = tf.keras.datasets.mnist
   (x_train, y_train), (x_test, y_test) = mnist.load_data()
-  # x_train = x_train[:2]
   x_train = x_train*1.0/255
   return x_train.flatten().tolist()
 ENDEMBED;
@@ -49,7 +48,6 @@ SET OF REAL4 get_train_Y() := EMBED(Python)
   import numpy as np
   mnist = tf.keras.datasets.mnist
   (x_train, y_train), (x_test, y_test) = mnist.load_data()
-  # y_train = y_train[:2]
   y_one_hot = np.eye(10)[y_train]
   res = y_one_hot.flatten().tolist()
   return y_one_hot.flatten().tolist()
@@ -109,7 +107,6 @@ mod2 := GNNI.Fit(mod, x, y, batchSize := batchSize, numEpochs := numEpochs,
 losses := GNNI.GetLoss(mod2);
 
 // Evaluate this model
-
 // Get testing set
 SET OF REAL4 get_test_X() := EMBED(Python)
   import tensorflow as tf
@@ -133,16 +130,13 @@ ENDEMBED;
 test_X := get_test_X();
 test_Y := get_test_Y();
 
-
 x1_test := DATASET(test_X, t1Rec);
 y1_test := DATASET(test_Y, t1Rec);
 x2_test := PROJECT(x1_test, TRANSFORM(intpuRec, SELF.id := COUNTER - 1, SELF.value := LEFT.value));
 y2_test := PROJECT(y1_test, TRANSFORM(intpuRec, SELF.id := COUNTER - 1, SELF.value := LEFT.value));
 
-
 x3_test := PROJECT(x2_test, TRANSFORM(TensData, SELF.indexes := [TRUNCATE(LEFT.id/784) + 1, TRUNCATE(LEFT.id%784/28) + 1, LEFT.id%28 + 1], SELF.value := LEFT.value));
 y3_test := PROJECT(y2_test, TRANSFORM(TensData, SELF.indexes := [TRUNCATE(LEFT.id/10) + 1, LEFT.id%10 + 1], SELF.value := LEFT.value));
-
 
 x_test := Tensor.R4.MakeTensor([0,28,28], x3_test);
 y_test := Tensor.R4.MakeTensor([0, 10], y3_test);
@@ -157,3 +151,5 @@ ORDERED([OUTPUT(STD.Date.CurrentTime(TRUE), NAMED('startTime')),
   OUTPUT(losses, NAMED('losses')),
   OUTPUT(metrics, NAMED('metrics')),
   OUTPUT(preds, NAMED('preds'))]);
+
+OUTPUT(IF(metrics[2].value>0.95, 'Pass', 'Fail'), NAMED('CategoricalAccuracy'));

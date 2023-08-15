@@ -8,7 +8,6 @@ nNodes := Thorlib.nodes();
 
 t_Tensor := Tensor.R4.t_Tensor;
 
-
 MAX_SLICE := POWER(2, 24);
 
 /**
@@ -182,9 +181,7 @@ EXPORT DATASET(t_Tensor) TensExtract(DATASET(t_Tensor) tens, UNSIGNED pos,
     return getResults()
   ENDEMBED; // Extract
 
-  // here
   effNodes := Utils.getEffNodesNumber(limitNodes);
-  // for range(reminderNodes): Nodes[id] = baseNodePerEffNode+1
 
   // definition: extract(STREAMED DATASET(t_Tensor) tens, UNSIGNED pos, UNSIGNED datcount, nodeid, nNodes, maxslice
   extractedData0 := extract(tens, pos-1, datcount, nodeId, nNodes, MAX_SLICE);

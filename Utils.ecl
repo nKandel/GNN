@@ -20,6 +20,8 @@ EXPORT Utils := MODULE
     // clipping eNodeNumber to totalAvailableNodes
     return IF(eNodeNumber<totalAvailableNodes, eNodeNumber, totalAvailableNodes);
   END;
+ 
+
   /**
     * Convert Tensor Data to OneHot Encoding.
     * <p>Input is a 1-D tensor data set with the value of each
@@ -39,7 +41,6 @@ EXPORT Utils := MODULE
     * @return A 2-D set of TensData one hot encoded.
     * @see Tensor.R4.TensData
     */
-  
   EXPORT DATASET(TensDat) ToOneHot(DATASET(TensDat) classDat, UNSIGNED numClasses) := FUNCTION
     oh := NORMALIZE(classDat, numClasses, TRANSFORM(TensDat,
                                         SELF.indexes := [LEFT.indexes[1], COUNTER],

@@ -22,7 +22,7 @@ TensData := Tensor.R4.TensData;
 
 // Test parameters
 batchSize := 1000;
-numEpochs := 1;
+numEpochs := 10;
 trainToLoss := .0001;
 bsr := .25; // BatchSizeReduction.  1 = no reduction.  .25 = reduction to 25% of original.
 lrr := 1.0;  // Learning Rate Reduction.  1 = no reduction.  .1 = reduction to 10 percent of original.
@@ -37,7 +37,8 @@ SET OF REAL get_train_X() := EMBED(Python)
   import numpy as np
   cifar100 = tf.keras.datasets.cifar100
   (x_train, y_train), (x_test, y_test) = cifar100.load_data()
-  x_train = x_train[:2]
+  # Train with the first 1000 data
+  x_train = x_train[:2000]
   x_train = x_train*1.0/255
   return x_train.flatten().tolist()
 ENDEMBED;
@@ -47,7 +48,8 @@ SET OF REAL get_train_Y() := EMBED(Python)
   import numpy as np
   cifar100 = tf.keras.datasets.cifar100
   (x_train, y_train), (x_test, y_test) = cifar100.load_data()
-  y_train = y_train[:2]
+  # Train with the first 1000 data
+  y_train = y_train[:2000]
   y_one_hot = np.eye(100)[y_train.flatten()]
   res = y_one_hot.flatten().tolist()
   return y_one_hot.flatten().tolist()
@@ -114,6 +116,7 @@ SET OF REAL get_test_X() := EMBED(Python)
   import numpy as np
   cifar100 = tf.keras.datasets.cifar100
   (x_train, y_train), (x_test, y_test) = cifar100.load_data()
+  # Test with the first 1000 data
   x_test = x_test[:1000]
   x_test = x_test*1.0/255
   return x_test.flatten().tolist()
@@ -124,6 +127,7 @@ SET OF REAL get_test_Y() := EMBED(Python)
   import numpy as np
   cifar100 = tf.keras.datasets.cifar100
   (x_train, y_train), (x_test, y_test) = cifar100.load_data()
+  # Test with the first 1000 data
   y_test = y_test[:1000]
   y_one_hot = np.eye(100)[y_test.flatten()]
   res = y_one_hot.flatten().tolist()

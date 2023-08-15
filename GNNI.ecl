@@ -276,15 +276,15 @@ EXPORT GNNI := MODULE
     *         from DefineModel(...) above.
     * @return A JSON string representing the model definition.
     */
-  SHARED STRING ToJSON_(UNSIGNED4 mod) := FUNCTION
-    kModelId := mod DIV kerasIdFactor;
-    results := Keras.ToJSON(DATASET([], kString), mod, kModelId);
+  SHARED STRING ToJSON_(UNSIGNED4 model) := FUNCTION
+    kModelId := model DIV kerasIdFactor;
+    results := Keras.ToJSON(DATASET([], kString), model, kModelId);
     result := results[1].text;
     RETURN result;
   END;
 
-  EXPORT STRING ToJSON(UNSIGNED4 mod) := FUNCTION
-    RETURN ToJSON_(mod);
+  EXPORT STRING ToJSON(UNSIGNED4 model) := FUNCTION
+    RETURN ToJSON_(model);
   END;
 
   /**
@@ -460,7 +460,7 @@ EXPORT GNNI := MODULE
       SELF := l;
     END;
     outWeights0 := ROLLUP(combined, doRollup(LEFT, RIGHT), wi, sliceId, LOCAL);
-    outWeights := Tensor.R4.Replicate(outWeights0); 
+    outWeights := Tensor.R4.Replicate(outWeights0);
     RETURN outWeights;
   END;
 
@@ -544,69 +544,6 @@ EXPORT GNNI := MODULE
   END; //OneNodeFit
 
   /**
-    * Train the model using synchronous batch distributed gradient descent.
-    * <p>The X tensor represents the independent training data and the Y
-    * tensor represents the dependent training data.
-    * <p>Both X and Y tensors
-    * should be record-oriented tensors, indicated by a first shape
-    * component of zero.  These must also be distributed (not replicated)
-    * tensors.  If the model specifies multiple inputs or outputs, then
-    * tensor lists should be supplied, using the work-item id (wi) to
-    * distinguish the order of the tensors in the tensor list (see Tensor.ecl).
-    * <p>BatchSize defines how many observations are processed on each node
-    * before weights are re-synchronized.  There is an interaction between
-    * the number of nodes in the cluster, the batchSize, and the complexity
-    * of the model.  A larger batch size will process epochs faster, but
-    * the loss reduction may be less per epoch.  As the number of nodes
-    * is increased, a smaller batchSize may be required.  The default
-    * batchSize of 512 is a good starting point, but may require tuning to
-    * increase performance or improve convergence (i.e. loss reduction).
-    * Final loss should be used to assess the fit, rather than number of
-    * epochs trained.  For example, for a given neural network, a loss of
-    * .02 may be the optimal tradeoff between underfit and overfit.  In that case
-    * the network should be trained to that level, adjusting number of epochs
-    * and batchSize to reach that level.  Alternatively, the trainToLoss
-    * parameter can be used to automatically stop when a given level of
-    * loss is achieved.  See the top-level module documentation for more
-    * insight on Performance Considerations.
-    * <p>
-    *
-    * @param model The model token from the previous GNNI call.
-    * @param x The independent training data tensor or tensor list.
-    * @param y The dependent training data tensor or tensor list.
-    * @param batchSize The number of records to process on each node before
-    *         re-synchronizing weights across nodes.
-    * @param numEpochs The number of times to iterate over the full training
-    *         set.
-    * @param trainToLoss Causes training to exit before numEpochs is complete
-    *         if the trainToLoss is met.  Defaults to 0, meaning that all
-    *         epochs will be run.  When using trainToLoss, numEpochs should
-    *         be set to a high value so that it does not exit before the training
-    *         goal is met.  Note that not all network / training data configurations
-    *         can be trained to a given loss.  The nature of the data and
-    *         the network configuration limits the minimum achievable loss.
-    * @param learningRateReduction Controls how much the learning rate is
-    *         reduced as epochs progress.  For some networks, training can
-    *         be improved by gradulally reducing the learning rate.  The
-    *         default value (1.0), maintains the original learning rate
-    *         across all epochs.  A value of .5 would cause the learning
-    *         rate to be reduced to half the original rate by the final
-    *         epoch.
-    * @param batchSizeReduction Controls how much the batchSize is
-    *         reduced as epochs progress.  For some networks, training can
-    *         be improved by gradually reducing the batchSize.  The
-    *         default value (1.0), maintains the original batchSize
-    *         across all epochs.  A value of .25 would cause the learning
-    *         rate to be reduced to one quarter the original rate by the final
-    *         epoch.
-    * @param localBatchSize The batch size to use when calling Keras Fit()
-    *         on each local machine.  The default (32) is recommended for
-    *         most uses.
-    * @return A new model token for use with subsequent GNNI calls.
-    */
-
-
-   /**
     * Train the model using synchronous batch distributed gradient descent.
     * <p>The X tensor represents the independent training data and the Y
     * tensor represents the dependent training data.
@@ -953,44 +890,63 @@ EXPORT GNNI := MODULE
     nf := Tensor2NF(td);
     RETURN nf;
   END;
-
-  EXPORT DATASET(GNN_Model) getModel(UNSIGNED4 mod) := FUNCTION
-    kModelId := mod DIV kerasIdFactor;
-    results := Keras.ToJSON(DATASET([], kString), mod, kModelId);
+  /*
+  * Returns the structure and weights of the model.
+  *
+  * @param model The model token as previously returned
+  *           from DefineModel(...) above.
+  * @return A DATASET containing the structure and weights of the model.
+  */
+  EXPORT DATASET(GNN_Model) GetModel(UNSIGNED4 model) := FUNCTION
+    kModelId := model DIV kerasIdFactor;
+    results := Keras.ToJSON(DATASET([], kString), model, kModelId);
     json := results[1].text;
     layersRec := DATASET(1, TRANSFORM(GNN_Model, SELF.model_JSON := json, 
       SELF.wi := 0, SELF.nodeId := 0, SELF.sliceId := 0, SELF.shape := [], SELF.dataType := 0, 
       SELF.maxSliceSize := 0, SELF.sliceSize := 0, SELF.denseData := [], 
       SELF.sparseData := DATASET([], Tensor.R4.t_SparseDat)), DISTRIBUTED);
-    weights := GetWeights(mod);
+    weights := GetWeights(model);
     modWeights := PROJECT(weights, TRANSFORM(GNN_Model, SELF := LEFT));
     fullModel := layersRec + modWeights;
     RETURN fullModel;
   END;
+  /*
+  * Creates a Keras model from previously saved DATASET.
+  * <p>Note that this call defines the model, but does not
+  * restore the compile definition.
+  * CompileMod(...) should be called after this to define the
+  * model compilation parameters.
 
-  EXPORT UNSIGNED4 setModel(UNSIGNED4 sess, DATASET(GNN_Model) fullModel) := FUNCTION
-    layerJSON := fullModel(wi = 0)[1].model_JSON;
-    trainedWeights := PROJECT(fullModel(wi > 0), t_Tensor);
+  * @param sess A session token previously returned from GetSession(..).
+  * @param FullModel A DATASET containing the structure and weights of the model.
+  * @return A model token to be used in subsequent GNNI calls.
+  */
+  EXPORT UNSIGNED4 SetModel(UNSIGNED4 sess, DATASET(GNN_Model) FullModel) := FUNCTION
+    layerJSON := FullModel(wi = 0)[1].model_JSON;
+    trainedWeights := PROJECT(FullModel(wi > 0), t_Tensor);
 
     modId := FromJSON_(sess, layerJSON);
     RETURN setWeights(modId, trainedWeights);
   END;
 
   /**
-    * Return a JSON representation of the Keras model.
+    * Returns the summary of the Keras model.
     *
-    * @param mod The model token as previously returned
+    * @param model The model token as previously returned
     *         from DefineModel(...) above.
-    * @return A JSON string representing the model definition.
+    * @return A string representing the summary of the model.
     */
-  EXPORT STRING getSummary(UNSIGNED4 mod) := FUNCTION
-    kModelId := mod DIV kerasIdFactor;
-    results := Keras.getSummary(DATASET([], kString), mod, kModelId);
+  EXPORT STRING GetSummary(UNSIGNED4 model) := FUNCTION
+    kModelId := model DIV kerasIdFactor;
+    results := Keras.getSummary(DATASET([], kString), model, kModelId);
     result := results[1].text;
     RETURN result;
   END;
-
-  EXPORT BOOLEAN isGPUAvailable() := FUNCTION
+  /*
+  * Tests whether the GPU is available in the current environment.
+  * @return Whether the current GPU is available.
+  */
+  EXPORT BOOLEAN IsGPUAvailable() := FUNCTION
     RETURN Keras.isGPUAvailable();
   END;
 END; // GNNI
