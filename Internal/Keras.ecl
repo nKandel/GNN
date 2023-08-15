@@ -582,8 +582,9 @@ EXPORT Keras := MODULE
       if validxy:
         # Received valid data
         # Restore the keras / tensorflow context for this model.
-        # Set the starting weights
-        mod.set_weights(wA)
+
+        if wA: # Set the starting weights; with this condition, we skip setWeight for SingleNode use case
+          mod.set_weights(wA)
         # Run one batch to fit the model
         if len(xAL) == 1:
           tfHistory = mod.fit(xAL[0], yAL[0], epochs=epoch, batch_size=kbatchsize, initial_epoch=epoch-1, shuffle=False)
@@ -594,6 +595,8 @@ EXPORT Keras := MODULE
         cumLoss[modelid] += currLoss
         # Get the new weights from Keras model.
         wA_out = mod.get_weights()
+        if not wA: # for SingleNode use case
+          return NpList2Tens(wA, isWeights = True)
         # For each layer, subtract the new weights from the starting weights to compute
         # the weight updates.  Scale the changes by the learningRate (lr) so that we can
         # control the lr as a fraction of the learing rate used within the optimizer from compileMod.
@@ -617,8 +620,12 @@ EXPORT Keras := MODULE
         EMBED(Python: globalscope(globalScope), persist('query'), activity)
     global batchCount, cumLoss
     try:
-      assert batchCount[modelid] > 0, 'Keras.GetLoss: batchCount = 0' + ', currEpoch = ' + str(currEpoch[modelid])
-      loss = cumLoss[modelid] / batchCount[modelid]
+      # assert batchCount[modelid] > 0, 'Keras.GetLoss: batchCount = 0' + ', currEpoch = ' + str(currEpoch[modelid])
+      batchCnt = batchCount.get(modelid, 0)
+      if batchCnt>0:  # we don't have batchCnt for single node cases.
+        loss = cumLoss[modelid] / batchCnt
+      else:  # Single Node use case
+        loss = 0.0
     except:
       assert False, format_exc('GetLoss -- modelId = ' + str(modelid) + ', batchCount = ' + str(batchCount))
       return [(0.0,)]
